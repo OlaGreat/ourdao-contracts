@@ -688,6 +688,8 @@ fn zero_amount_loan_request_rejected() {
 
     let err_neg = s.client.try_request_loan(&borrower, &-100, &None);
     assert_eq!(err_neg, Err(Ok(Error::InvalidAmount)));
+}
+
 // ==================== issue #190: member loan stats view ====================
 #[test]
 fn member_loan_stats_track_lifecycle() {
@@ -790,4 +792,41 @@ fn member_loan_stats_unknown_member_rejected() {
         s.client.try_get_member_loan_stats(&stranger),
         Err(Ok(Error::NotMember))
     );
+}
+
+// ===========================================================================
+// Issue #173: Off-by-one in voting period deadline comparison
+// ===========================================================================
+
+#[test]
+fn voting_closed_exactly_at_deadline() {
+    // At now == deadline a vote must be rejected (VotingEnded), not accepted.
+    let s = setup(3);
+    let borrower = s.members.get(0).unwrap();
+    let voter = s.members.get(1).unwrap();
+
+    let pid = s.client.request_loan(&borrower, &500, &None);
+    advance(&s.env, EDITING + VOTING_PERIOD);
+
+    let res = s.client.try_vote_on_loan_proposal(&voter, &pid, &true);
+    assert_eq!(
+        res,
+        Err(Ok(crate::Error::VotingEnded)),
+        "vote at exact deadline must be rejected"
+    );
+}
+
+#[test]
+fn voting_open_one_second_before_deadline() {
+    // One second before deadline a vote must still be accepted.
+    let s = setup(3);
+    let borrower = s.members.get(0).unwrap();
+    let voter = s.members.get(1).unwrap();
+
+    let pid = s.client.request_loan(&borrower, &500, &None);
+    advance(&s.env, EDITING + VOTING_PERIOD - 1);
+
+    s.client.vote_on_loan_proposal(&voter, &pid, &true);
+    let prop = s.client.get_loan_proposal(&pid).unwrap();
+    assert!(prop.for_votes > 0, "vote should have been recorded");
 }
